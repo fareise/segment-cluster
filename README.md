@@ -8,3 +8,5 @@ segment.py：对一段驾驶操作进行分段的函数文件
 conTable.py：读取大量文件，将所有分段组成为一个dataFrame的函数文件
 
 calcu.py：对所有文件的不同分段的不同操作进行统计
+
+firstExp.py：第一次试验所有代码集合
