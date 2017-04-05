@@ -1,0 +1,248 @@
+#1.计算持续时间
+def getLast(series):
+    series = np.array(series)
+    start = 0
+    end = 0
+    for i in range(0, series.size-1):
+        if series[i] != 0:
+            start = i
+            break
+    for j in range(0, series.size):
+        if(series[series.size-j-1] != 0):
+            end = series.size-j
+            break
+        else:
+            end = series.size
+    return (end - start - 1)/4
+
+#2.计算操作的次数
+def getOperNum(series):
+    operNum = 0;
+    series = np.array(series)
+    diffSeries = np.diff(series)
+    for i in range(0, diffSeries.size):
+        if(diffSeries[i] != 0):
+            operNum = operNum + 1
+    if operNum == 0:
+        operNum = -1
+    return operNum
+
+#3.计算平均操作幅度
+def getRange(series):
+    series = np.array(series)
+    rangeAll = abs(np.diff(series)).sum()
+    rangeSin = rangeAll / getOperNum(series)
+    return rangeSin
+
+#4.计算方差
+def getVar(series):
+    series = np.array(series)
+    sum1 = series.sum()
+    narray2=series*series
+    sum2=narray2.sum()
+    mean=sum1/series.size
+    var=sum2/series.size-mean**2
+    return var
+
+#5.计算极差
+def getGap(series):
+    series = np.array(series)
+    gap = max(series) - min(series)
+    return gap
+
+#6.计算逆转率
+def getNi(series):
+    series = np.array(series)
+    ni = 0;
+    for i in range(0, series.size-1):
+        if(series[i]*series[i+1] < -1):
+            ni = ni + 1
+    nirate = ni / getOperNum(series)
+    return nirate
+
+#航班分段，传入SSTICK参数ravel()后的list
+def getDis(series):
+    series = np.array(series)
+    i = 0
+    start = []
+    end = []
+    flag = -1
+    while i < series.size:
+        if series[i] == 0:
+            i = i + 1
+        else:
+            flag = flag + 1
+            start.append(i)
+            for m in range(i, series.size):
+                if series[m] == 0:
+                    end.append(m)
+                    break
+                else:
+                    if m == series.size-1:
+                        end.append(series.size-1)
+                    else:
+                        continue
+            i = end[flag]
+    return start, end
+    
+#获取操纵特征
+def segmentOne(seriesSstick, seriesRoll):
+    start, end = getDis(seriesSstick)
+    operNum = []
+    last = []
+    rangeNum = []
+    var = []
+    gap = []
+    ni = []
+    for i in range(0, len(start)):
+        segment = seriesRoll[start[i]:end[i]]
+        operNum.append(getOperNum(segment))
+        last.append(getLast(segment))
+        rangeNum.append(getRange(segment))
+        var.append(getVar(segment))
+        gap.append(getGap(segment))
+        ni.append(getNi(segment))
+    factors = {
+        "start": start,
+        "end": end,
+        "operNum": operNum,
+        "last": last,
+        "rangeNum": rangeNum,
+        "var": var,
+        "gap": gap,
+        "ni": ni
+    }
+    return factors
+    
+#获取环境特征
+def esegmentOne(seriesSstick, df):
+    start, end = getDis(seriesSstick)
+    start = (np.array(start)/4).astype(int)
+    end = (np.array(end)/4).astype(int)
+    windMean = []
+    windirMean = []
+    windVar = []
+    windirVar = []
+    height = []
+    for i in range(0, len(start)):
+        height.append((df['_ALTITUDE'].iloc[start[i]]+df['_ALTITUDE'].iloc[end[i]])/2)
+        windMean.append((df['_WIND_SPD'].iloc[start[i]]+df['_WIND_SPD'].iloc[start[i]])/2)
+        windirMean.append((df['_WINDIR'].iloc[start[i]]+df['_WINDIR'].iloc[start[i]])/2)
+        windVar.append(calVar(df['_WIND_SPD'][start[i]:end[i]]))
+        windirVar.append(calVar(df['_WINDIR'][start[i]:end[i]]))
+    efactors = {
+        'height': height,
+        'windMean': windMean,
+        'windVar': windVar,
+        'windirMean': windirMean,
+        'windirVar': windirVar
+    }
+    return efactors
+    
+#df截取
+def clip(df):
+    td = df.loc[df["_LDG_STATUS"] ==3, :].index[-1]
+    df = df[(td-300):(td-10)]
+    df = df.loc[(df['_ALTITUDE'] < 1000) & (df['_ALTITUDE'] >100), :]
+    return df
+    
+#求方差
+def calVar(nlist):
+    narray=np.array(nlist)
+    N = len(narray)
+    sum1=narray.sum()
+    narray2=narray*narray
+    sum2=narray2.sum()
+    mean=sum1/N
+    var=sum2/N-mean**2
+    return var
+    
+def makeTable2(aval):
+    skip = 0
+    rollSstick = ['_ROLL_CAPT_SSTICK', '_ROLL_CAPT_SSTICK-1', '_ROLL_CAPT_SSTICK-2', '_ROLL_CAPT_SSTICK-3']
+    sstick = ['_SSTICK_CAPT', '_SSTICK_CAPT-1','_SSTICK_CAPT-2','_SSTICK_CAPT-3']
+    tableFactor = pd.DataFrame(columns=['FILNAME','START','END','LAST','OPERNUM','RANGENUM','VAR','GAP','NI','HEIGHT','WINDMEAN','WINDVAR','WINDIRMEAN','WINDIRVAR'])
+    for i in aval:
+        df = read_flight_csv(i)
+        df = df.fillna(method='pad')
+        df = clip(df)
+        rollSum = pd.Series(df[rollSstick].values.ravel())
+        sstickSum = pd.Series(df[sstick].values.ravel())
+        factors = segmentOne(sstickSum, rollSum)
+        efactors = esegmentOne(sstickSum, df)
+        for m in range(0, len(factors["last"])):
+            newFactor = pd.DataFrame({
+                    "FILNAME": i,
+                    "START": factors['start'][m],
+                    "END": factors['end'][m],
+                    "LAST": factors["last"][m],
+                    "OPERNUM": factors["operNum"][m],
+                    "RANGENUM": factors["rangeNum"][m],
+                    "VAR": factors["var"][m],
+                    "GAP": factors["gap"][m],
+                    "NI": factors["ni"][m],
+                    "HEIGHT": efactors['height'][m],
+                    "WINDMEAN": efactors['windMean'][m],
+                    "WINDVAR": efactors['windVar'][m],
+                    "WINDIRMEAN": efactors['windirMean'][m],
+                    "WINDIRVAR": efactors['windirVar'][m]}, index=[i])
+            tableFactor = tableFactor.append(newFactor)
+    return tableFactor, skip
+    
+#聚类函数
+def kmeans(table, num):
+    loan = np.array(table)
+    clf=KMeans(n_clusters=num)
+    clf=clf.fit(loan)
+    table['label']=clf.labels_
+    return table
+    
+#确定聚类个数
+def calNum(table, maxNum):
+    clfNum = []
+    loan = np.array(table)
+    for i in range(1, maxNum+1):
+        clf=KMeans(n_clusters=i)
+        clf=clf.fit(loan)
+        clfNum.append(clf.inertia_)
+    return clfNum
+
+#获取垂直载荷
+def getVrtg(df):
+    td = df.loc[df["_LDG_STATUS"] ==3, :].index[-1]
+    vrtg= max(df["_VRTG"][td-15:td+5])
+    return vrtg
+    
+#生成以不同操纵为特征的航班dataFrame
+def claAir(m, tableN):
+    cla = list(range(0, 25))
+    classAir = pd.DataFrame(columns=cla)
+    for i in m:
+        dfPart = tableN.loc[tableN['FILNAME']==i]
+        tem = dfPart['label'].value_counts()
+        row = np.zeros((25, 1))
+        for index in tem.index:
+            row[index] = tem[index]
+        anew = {}
+        row = np.array(row).astype(int)
+        for k in range(0, 25):
+            anew[k] = row[k]
+        airNew = pd.DataFrame(anew, index=[i])
+        classAir = classAir.append(airNew)
+    return classAir
+    
+#计算每种类型航班的垂直过载
+def calVrtgMean(tt):
+    VrtgRelateClass = pd.DataFrame(columns=['class', 'vrtgMean'])
+    for i in range(0, 10):     #传入要分的类别数
+        tairIndex = tt.loc[tt['label'] == i].index
+        vrtgAll = 0
+        for m in tairIndex:
+            vrtgAll = vrtgAll + getVrtg(read_flight_csv(m))
+        vrtgMean = vrtgAll / len(tairIndex)
+        newVrtg = pd.DataFrame({
+                'class': i,
+                'vrtgMean': vrtgMean
+            }, index=[i])
+        VrtgRelateClass = VrtgRelateClass.append(newVrtg)
+    return VrtgRelateClass
